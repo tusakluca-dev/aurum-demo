@@ -1,84 +1,100 @@
-# AURUM Demo Terminal
+# AURUM · Lokale Trading-KI für MT5-Demokonten
 
-Experimenteller lokaler Windows-Prototyp für automatischen XAUUSD-Demohandel mit MetaTrader 5. Enthält ein Browser-Dashboard, Einstiegssperren, SQLite-Journal und ein lernendes logistisches Modell. Keine Quantenberechnung, kein fertiges oder als profitabel validiertes Produkt.
+Ein experimentelles Windows-System mit lokalen Sprachmodellanalysen, begrenzter Strategieforschung, mehreren Kursmodellen, Lernjournal und automatischem XAUUSD-Demohandel. **Keine umfassende selbstständig denkende Intelligenz, kein Profitabilitätsnachweis, kein Echtgeldmodus.**
 
-## Auf Windows starten
+## Einrichtung auf deinem Windows-PC
 
-1. Python **3.12, 64-bit** von python.org installieren, inklusive Python Launcher.
-2. MT5 öffnen und auf dem **Demokonto** anmelden. In der Marktübersicht XAUUSD einblenden. Falls der Broker GOLD oder einen Symbolzusatz verwendet, `symbol` in `config.json` anpassen.
-3. Einen M5-Chart öffnen und historische Daten laden lassen. Mindestens 800 abgeschlossene Kerzen pro verwendeter Zeitebene sind nötig; das Programm fragt bis zu 4.000 ab.
-4. In MT5 unter Extras → Optionen → Expert Advisors den algorithmischen Handel zulassen und die Option, die automatischen Handel über die externe Python-API deaktiviert, ausschalten. Algo Trading aktivieren.
-5. `start.bat` doppelklicken. Es erstellt eine virtuelle Python-Umgebung und installiert Pakete. Browseradresse: http://127.0.0.1:8765. Das Konsolenfenster offen lassen.
-6. Status prüfen und **Demohandel starten** anklicken. Jeder Start der Anwendung beginnt pausiert. Ohne genehmigtes Modell oder bei Filtern werden keine Orders eröffnet. Das kann über längere Zeit so bleiben.
+Für 32 GB RAM und eine RTX 4070 ist zunächst **Qwen2.5 7B über Ollama** vorgesehen. Inferenz läuft lokal; das Modell ist mehrere GB groß. Eine aktuelle Ollama-Installation und funktionierende NVIDIA-Treiber sind erforderlich. Die konkrete Windows-/GPU-Ausführung muss auf deinem PC geprüft werden.
 
-Zugangsdaten bleiben ausschließlich in MT5. Das Programm akzeptiert nur Konten, die MT5 ausdrücklich als Demo meldet; MetaQuotes-Demo ist keine Voraussetzung. Manche Demoserver bieten Gold nicht an. Dann ist ein Demokonto eines Brokers mit XAUUSD erforderlich. Konto-ID und Server werden lokal gespeichert, um Journale verschiedener Konten nicht zu vermischen. Für ein anderes Konto einen frischen Programmordner nutzen.
+1. Python **3.12, 64-bit**, inklusive Python Launcher installieren.
+2. MT5 öffnen, Demokonto anmelden und XAUUSD einblenden. Falls Gold anders heißt, `symbol` in `config.json` anpassen. Manche MetaQuotes-Demoserver bieten kein Gold an; dafür ist ein Broker-Demokonto mit Gold erforderlich.
+3. Algorithmischen Handel in MT5 zulassen. Unter Extras → Optionen → Expert Advisors die Sperre für automatischen Handel über die externe Python-API ausschalten. Algo Trading aktivieren.
+4. `setup_local_ai.bat` ausführen. Fehlt Ollama, öffnet sich die offizielle Windows-Downloadseite. Ollama installieren/starten und die Datei danach erneut ausführen. Sie lädt `qwen2.5:7b` und testet das lokale Modell.
+5. `local_ai.json` prüfen: Slippage und Kommission an deinen Broker anpassen. `commission_per_lot_round_trip` ist die Gesamtkommission für Eröffnung und Schließung eines Lots in Kontowährung. **0 ist eine Nullkostenannahme**, keine automatisch ermittelte Brokergebühr.
+6. `start.bat` ausführen. Das Browser-Dashboard läuft auf http://127.0.0.1:8765. Das Konsolenfenster offen lassen. Falls sich der Browser zu früh öffnet, die Seite nach Dienststart neu laden.
+7. Unter **Lokale Trading-KI** die Quellenanalyse und Forschungsergebnisse prüfen. Der erste Modellstart kann einige Minuten dauern. Forschung und Kursmodelltraining laufen auch bei pausiertem Demohandel. Danach bei Bedarf **Demohandel starten** anklicken.
 
-## Regeln und No-Trading-Zonen
+Die App startet immer mit pausierten Einstiegen. Fehlen Ollama, Nachrichtenquellen oder bestandene Prüfungen, handelt sie standardmäßig nicht. Ein pausierter/gesperrter Bot ist kein Beleg für einen Programmfehler; die Oberfläche zeigt den jeweiligen Grund.
 
-`config.json` bei pausierter Anwendung bearbeiten; sie wird alle fünf Sekunden neu gelesen:
+## Update einer vorhandenen Installation
 
-- `risk_percent`: geplantes Risiko pro Einstieg in Prozent der Equity (Standard 0,25). Mindestlot wird nicht aufgerundet. Spread, Ausführung und Kurslücken können reale Verluste erhöhen.
-- `daily_loss_percent`: blockiert neue Einstiege ab 2 % Equity-Verlust gegen die erste gespeicherte Equity des UTC-Tages. Kontoweite Grenze einschließlich manueller Trades, Ein-/Auszahlungen und offener Verluste. **Keine automatische Liquidation**, kein garantiertes Verlustmaximum.
-- `price_zones`: z. B. `[[2700, 2715], [2750, 2760]]`. Absolute Preisbereiche, keine automatisch erkannten Chartzonen.
-- `blocked_hours_utc`: gesperrte volle Stunden in UTC; Sommer-/Winterzeit beachten.
-- `blocked_windows_utc`: z. B. `[["2026-11-06T13:15:00+00:00", "2026-11-06T14:15:00+00:00"]]`. Manuelle Ereignissperren. **Kein Nachrichtenfeed**.
-- `max_spread_atr`: Spread relativ zur M5-ATR; Standard 0,12.
-- `min_probability`: Signalgrenze 0,65. Modellwerte sind unkalibrierte Schätzungen, keine verlässlichen Gewinnwahrscheinlichkeiten.
+1. Neue Einstiege stoppen und die Python-Konsole schließen. Offene Positionen in MT5 kontrollieren.
+2. Die aktuelle GitHub-ZIP in einen **neuen Ordner** entpacken.
+3. Aus dem bisherigen Ordner `config.json`, `account.json`, `trades.sqlite` sowie gegebenenfalls `research.sqlite` und deine angepasste `local_ai.json` in den neuen Ordner übernehmen. Vorher eine Sicherung anlegen. Eine neue Datei `local_ai.json` liegt der ZIP für die erste lokale KI-Einrichtung bei.
+4. Die lokale KI wie oben einrichten, anschließend `start.bat` im neuen Ordner starten. Nicht beide Instanzen parallel betreiben. Im Browser **Strg+F5** drücken.
 
-Es gibt höchstens eine offene Position im Symbol (auch manuelle Positionen sperren Einstiege). Pro geschlossener Kerze der Ausführungszeitebene erfolgt höchstens ein Orderversuch. Stop-Loss und Take-Profit werden mit der Order an MT5 gesendet. Ein abgelehnter Versuch wird in derselben Kerze nicht wiederholt. Bei Fehlern pausiert der Bot; MT5 prüfen und bei Bedarf neu starten. Nur eine Programminstanz pro MT5-Terminal betreiben.
+So werden neue Python-Module vollständig übernommen, während deine Daten erhalten bleiben. Ein altes Programm nur durch Austausch von `app.py` zu aktualisieren reicht für diese Version nicht aus.
 
-**Einstiege stoppen** schließt keine Positionen. Beendest du den Dienst, bleiben bereits beim Broker liegende SL/TP bestehen. Schutzorders garantieren keinen Ausführungspreis. Positionen direkt in MT5 kontrollieren.
+## Was die einzelnen Teile leisten
 
-## Was hier „Lernen“ bedeutet
+### Lokales Sprachmodell
 
-Jede konfigurierte Zeitebene erhält ein eigenes Modell. Jedes Modell lernt aus Kursmerkmalen (Momentum und Schwankung) die Richtung drei Kerzen seiner eigenen Zeitebene später. Der letzte Teil der Historie bleibt als chronologischer Test getrennt; drei Trainingskerzen vor dem Test werden ausgelassen. Unter 55 % Balanced Accuracy sind Einstiege gesperrt. Das ist eine einfache Forschungsschranke, **kein kostenbereinigter Backtest und keine hinreichende Freigabe für Echtgeld**.
+Die App spricht ausschließlich `http://127.0.0.1:11434` an und umgeht dafür HTTP-Proxys. Kein externer Sprachmodell-Dienst wird verwendet. Das Modell erhält öffentliche Marktdaten, Quellen und frühere Forschungsberichte, keine MT5-Zugangsdaten oder Kontonummern.
 
-Jede vom Bot eröffnete und vollständig geschlossene Position wird mit Nettogewinn inklusive verfügbarer Gebühren und getrennten Merkmalen jeder verfügbaren Zeitebene gespeichert. Bei späteren stündlichen Trainingsläufen ergänzen ausreichend alte Ergebnisse das Training; der Testzeitraum bleibt ausgeschlossen. Gebührenfreier Nullgewinn wird nicht als Lernergebnis verwendet. Es erfolgt keine unkontrollierte Modelländerung nach jedem einzelnen Trade. Fehlgeschlagene Kandidaten sperren neue Einstiege, statt ein altes Modell weiterlaufen zu lassen.
+Die Nachrichtenanalyse verwendet Titel und verfügbare Zusammenfassungen datierter öffentlicher RSS-Meldungen von Federal Reserve und BLS. Sie zeigt Links, Veröffentlichungszeiten, mögliche wirtschaftliche Zusammenhänge, Unsicherheiten und eine Modellbewertung des Risikos. Ältere Meldungen werden als Hintergrund gekennzeichnet. Fehlgeschlagene Quellen werden angezeigt. **Kein vollständiger Nachrichtenstrom, kein Wirtschaftskalender, keine Überraschungsdatenbank und kein garantiert sachlich korrektes Verständnis.** Belegte Quellenbezüge verringern erfundene Quellen, beweisen aber nicht die Richtigkeit jeder Aussage. Ein Modellergebnis bleibt eine Interpretation.
 
-Grenzen: Rückblicktest ohne echte Handelsausführung; Klassifikationsziel und tatsächlicher SL/TP-Ausgang unterscheiden sich. Historische Muster und laufende Trades sind abhängig. Modellwerte sind unkalibriert. Keine automatische Strategieoptimierung, kein Vergleich gegen ein produktives Champion-Modell, kein vollständiges Walk-forward-Verfahren, keine Newsdaten, kein Echtgeldmodus. Positionsmanagement über SL/TP, keine Trailing-Stops oder zeitgesteuerten Ausstiege. Das System enthält noch keinen belastbaren Profitabilitätsnachweis.
+Das vortrainierte Sprachmodell wird hier **nicht feintrainiert**. Gespeicherte Forschungsberichte werden gezielt als Kontext abgerufen. Das ist Erfahrungsabruf, keine automatische Änderung seiner Sprachmodellgewichte.
 
-## Prüfung und Daten
+### Strategieforschung und Auswahl
 
-`python -m unittest discover -s tests -v` prüft Risikoregeln, Zonen und grundlegende Modellfunktionen. Der HTTP-Laufzeittest wurde durch das Socket-Verbot der Entwicklungs-Sandbox blockiert. Die tatsächliche Windows-/MT5-Verbindung und Broker-Orders müssen auf deinem Demokonto geprüft werden; sie konnten in der Linux-Entwicklungsumgebung nicht getestet werden.
+Das Sprachmodell darf neue Parameter für drei vorgegebene Regelfamilien vorschlagen: Momentum, Gegenbewegung und Ausbruch. Es darf keinen frei erzeugten Code ausführen. Parameter werden streng geprüft. Es entwickelt damit prüfbare Hypothesen innerhalb eines begrenzten Suchraums, keine beliebigen neuen Handelsalgorithmen.
 
-Lokale Dateien: `trades.sqlite` (Journal/Trainingsdaten/Tagesbasis), `account.json` (Kontobindung). Nicht löschen, während die Anwendung läuft. Das Dashboard lauscht nur auf 127.0.0.1 und nutzt ein Sitzungstoken für Start/Stopp. Kein Netzwerkzugriff oder Cloudhosting eingerichtet.
+Für die Ausführungszeitebene werden bis zu 4.000 Kerzen geladen; mindestens 1.000 sind erforderlich. Die ersten 60 % dienen als Entwicklungskontext für den Strategieaufruf, die nächsten 20 % als Validierung und die letzten 20 % als abschließender Test. Der Strategieaufruf erhält weder diese Testkurse noch heutige Nachrichten. Die aktuelle Nachrichtenanalyse ist ein **getrennter** Sprachmodellaufruf. Die Tests belegen daher ausschließlich die technischen Regeln, nicht die Profitabilität nachrichtenbasierter Entscheidungen.
 
+Kandidat und bisherige Referenz werden auf denselben Abschnitten geprüft. Eingänge werden am nächsten Kerzen-Open simuliert. Berücksichtigt werden historische Bid/Ask-Spreads, eine Slippage-Annahme und die konfigurierte Kommission. Bei einer Kerze, die Stop und Ziel berührt, wird konservativ der Stop zuerst gewertet. Stop-Gaps können mehr als ein geplantes Risiko verlieren.
 
-## Mehrere Zeitebenen (Version 2)
+Die Ausgabe wird in R dargestellt: Ein R entspricht dem geplanten Stop-Risiko. Die festen Forschungsschranken sind mindestens 30 abgeschlossene Test-Trades je Abschnitt, positives Nettoergebnis, mindestens 0,05 R pro Trade im Mittel und höchstens 10 R Drawdown. Ein Kandidat ersetzt die Referenz nur, wenn er beide Abschnitte besteht und die Referenz jeweils im Nettoergebnis übertrifft. Besteht lediglich die Referenz, bleibt sie ausgewählt. Besteht keine, werden neue Einstiege gesperrt. Das sind Forschungsschranken, **kein statistischer Beweis eines Vorteils**.
 
-Standardmäßig werden **M1, M5, M15, M30, H1, H4 und D1** separat trainiert. MT5 muss dafür keine sieben Charts geöffnet haben: Die Daten werden direkt über die API geladen. Jeder historische Test und jedes stündliche Training gehören nur zu ihrer jeweiligen Zeitebene. Trade-Ergebnisse ergänzen jedes Modell mit dessen eigenen Merkmalen vom Zeitpunkt des Einstiegs. Diese Modelle lernen allerdings alle aus denselben ausgeführten Trades; Bestätigungen sind keine statistisch unabhängigen Belege.
+Weitere unabhängige Strategietests benötigen einen vollständig neuen letzten Testabschnitt nach den zuvor geprüften Kerzen. Die KI optimiert nicht stündlich gegen denselben Test und bezeichnet das als neuen Erfolg. Bis genug neue Kerzen vorliegen, werden nur Nachrichten aktualisiert. Prüfungen verfallen nach `max_strategy_age_hours` (Standard 48 Stunden); das kann zusätzliche Pausen verursachen. Höhere Zeitebenen benötigen für neue Tests sehr lange Zeit. Preis- und Nachrichteninformationen, die schon im vortrainierten Modell enthalten waren, lassen sich nicht vollständig aus seinem Vorwissen entfernen; echte zukünftige Demodaten bleiben für die Validierung wichtig.
 
-In `config.json` steuert `timeframes` die Trainingszeitebenen, `execution_timeframe` die Einstiegstaktung und ATR-Risikoberechnung (Standard M5). Alle nativen MT5-Zeitebenen sind als Namen konfigurierbar: M1, M2, M3, M4, M5, M6, M10, M12, M15, M20, M30, H1, H2, H3, H4, H6, H8, H12, D1, W1, MN1. Broker müssen mindestens 800 geschlossene Kerzen pro Zeitebene bereitstellen. Besonders W1/MN1 haben häufig zu wenig Historie. Fehlende Daten werden im Dashboard angezeigt und liefern keine Bestätigung.
+Kostenänderungen sperren neue Einstiege, bis eine neue Prüfung stattgefunden hat. Eine spätere erneute Prüfung kann die bisherige Strategie verwerfen. Die Ergebnisse aller Läufe werden gespeichert. Ein automatisches Zurücksetzen anhand realer Live-Trade-Statistiken sowie vollständige Walk-forward-Portfolio-Tests sind noch nicht implementiert.
 
-Das Ausführungsmodell muss den Test bestehen und ein ausreichend starkes Signal liefern. Mindestens `min_confirmations` (Standard 2, einschließlich Ausführungsmodell) geprüfte Modelle müssen die gleiche Richtung mit der eingestellten Signalstärke bestätigen. Gibt ein anderes geprüftes Modell ein ausreichend starkes Gegensignal, werden Einstiege gesperrt. Ungeprüfte oder unsichere Modelle enthalten sich. Bei fehlenden Daten der Ausführungszeitebene pausiert der Dienst. Fehlende optionale Zeitebenen verhindern Handel nicht, sofern genug andere Modelle bestätigen.
+### Automatischer Demohandel
 
-Der Dashboard-Kurschart zeigt die Ausführungszeitebene; die Modellübersicht zeigt Status und Prognose aller konfigurierten Zeitebenen. Das Umschalten eines Charts in MT5 ändert die Konfiguration des Bots nicht. Änderungen an `timeframes` oder `execution_timeframe` bitte pausiert vornehmen und die Anwendung danach neu starten.
+Die bestehenden Kursmodelle werden je Zeitebene trainiert. Standard: M1, M5, M15, M30, H1, H4 und D1. Es müssen keine zusätzlichen Charts geöffnet sein. Mindestens 800 geschlossene Kerzen pro Kursmodell sind nötig. Andere native MT5-Zeitebenen sind in `timeframes` konfigurierbar. M5 bleibt standardmäßig die Ausführungszeitebene (`execution_timeframe`).
 
-Bestehende Journale werden unterstützt: Ältere Trades enthalten nur M5-Merkmale und ergänzen ausschließlich das M5-Modell. Neue Trades speichern getrennte Merkmalsvektoren je verfügbarer Zeitebene. Es werden weiterhin ausschließlich das konfigurierte Goldsymbol und ein Demokonto gehandelt, keine weiteren Instrumente automatisch hinzugefügt.
+Das Ausführungsmodell benötigt mindestens 55 % Balanced Accuracy auf seinem historischen Test und eine Richtungsschätzung oberhalb 65 % bzw. unterhalb 35 %. Mindestens zwei geprüfte Modelle müssen die Richtung stark bestätigen, starke Gegensignale sperren. Die Wahrscheinlichkeitsschätzungen sind nicht kalibriert. Diese Richtungsprüfung ist kein Profitabilitätsnachweis.
 
+Zusätzlich muss die lokale Forschungsstrategie bei `require_research_for_entries: true` denselben Einstieg bestätigen, ihre Prüfung aktuell sein und die Nachrichtenanalyse darf kein erhöhtes Risiko melden. `unknown` bedeutet unbekannt, nicht risikofrei. Die Forschungsstrategie darf die ursprünglichen Risikosperren nicht aufheben. SL-/TP-Abstände stammen aus ihren geprüften Regeln; das Mindestabstandslimit des Brokers kann sie verändern. Eigene so eröffnete Positionen erhalten außerdem einen Zeitausstieg nach der vorgeschlagenen Zahl geschlossener Kerzen. Dieser Zeitausstieg benötigt einen laufenden Dienst. Bereits übermittelte SL/TP liegen in MT5/Broker.
 
-## Update bei falsch dargestellten Umlauten (Windows)
+Das Demokonto wird vor Orders geprüft, Kontowechsel werden gesperrt. Höchstens eine Position pro Symbol, geplantes Risiko 0,25 % der Equity je Einstieg, Tagesverlustsperre 2 % gegen die erste gespeicherte Equity des UTC-Tages. Kontoweite Equity enthält auch manuelle Trades, Ein-/Auszahlungen und offene Verluste. Die Tagesgrenze sperrt neue Einstiege und liquidiert nicht automatisch. **Kein garantiertes Verlustmaximum.**
 
-Die Version mit expliziter UTF-8-Kodierung behebt falsche Umlaute, Trennzeichen und Pfeile im gesamten Dashboard. Ursache war das Einlesen der UTF-8-HTML-Datei mit der Windows-Standardkodierung. Auch JSON-Antworten und die Windows-Konsole verwenden nun ausdrücklich UTF-8.
+**Einstiege stoppen** lässt Positionsverwaltung und SL/TP aktiv. Bei Fehlern pausieren neue Einstiege. Offene Positionen bei Bedarf direkt in MT5 schließen. Änderungen von Symbol und Zeitebenen nur ohne offene Bot-Positionen vornehmen. Eine Installation gehört zu einem Konto.
 
-1. Im Dashboard neue Einstiege stoppen. Das Konsolenfenster anschließend schließen. Offene Positionen weiterhin in MT5 kontrollieren.
-2. Die aktuelle ZIP von GitHub herunterladen und in einen separaten Ordner entpacken.
-3. Aus dem neuen Ordner nur `app.py` und `start.bat` in den bisherigen Programmordner kopieren und ersetzen. `config.json`, `account.json` und `trades.sqlite` behalten, damit Einstellungen und Journal erhalten bleiben.
-4. `start.bat` im bisherigen Ordner starten, dann im Browser **Strg+F5** drücken. Falls die Seite zu früh geöffnet wurde, nach dem Start nochmals neu laden.
+### No-Trading-Zonen
 
-Die Korrektur verändert keine Handelsfilter oder Modellschwellen. Eine Meldung über nicht bestandene Modellvalidierung ist weiterhin eine eigenständige Einstiegssperre.
+In `config.json`:
 
+- `price_zones`: z. B. `[[2700,2715],[2750,2760]]`, absolute Preiszonen.
+- `blocked_hours_utc`: gesperrte ganze UTC-Stunden; Sommer-/Winterzeit berücksichtigen.
+- `blocked_windows_utc`: z. B. `[["2026-11-06T13:15:00+00:00","2026-11-06T14:15:00+00:00"]]`, manuelle Ereignissperren.
+- `max_spread_atr`: maximaler Spread relativ zur ATR, Standard 0,12.
 
-## Lernjournal und nachvollziehbare Analyse
+Ein automatischer Kalender mit Sperren vor kommenden Nachrichten ist noch nicht angeschlossen. Eine Analyse bereits veröffentlichter RSS-Texte ersetzt diesen nicht.
 
-Unter dem bisherigen Dashboard stehen nun **Analyse nachvollziehen** und **Lernjournal**. Die Zeitebene der Erklärung ist auswählbar; das automatische Demotrading verwendet weiterhin die vorhandenen Prüfungen.
+## Wo du das Lernen siehst
 
-Das Journal speichert echte Trainingsläufe dauerhaft in einer zusätzlichen Tabelle von `trades.sqlite`: Version je Symbol/Zeitebene, Zeitpunkt, Anzahl von Kurs- und tatsächlich verwendeten Trade-Beispielen, Testwert, Modellgewichte, Normalisierung und Änderungen gegenüber dem vorherigen Lauf. Ein JSON-Export enthält die letzten 40 Trainingsläufe einschließlich Modellparametern. Die Datenbasis ist weiterhin die verfügbare Kurshistorie plus die älteren abgeschlossenen Bot-Trades, nicht jede historische Trade-Entscheidung des Nutzers. `0 Trade-Beispiele` bedeutet, dass dieser Lauf noch keine Trade-Erfahrung verwendet hat.
+**Lokale Trading-KI:** Quellenanalyse, Hypothese, Kandidat/Referenz, Handelskosten, Test-Trades, Netto-R, Drawdown, Freigabe und letzte Forschungsberichte. Das funktioniert erst nach erfolgreicher lokaler Einrichtung und verfügbarer Datenverbindung.
 
-Die aktuelle Analyse zeigt die exakten Beiträge der vier Kursmerkmale zum logistischen Modellwert (Log-Odds). Positive Beiträge erhöhen die berechnete Wahrscheinlichkeit eines Kursanstiegs gegenüber dem Basiswert; negative senken sie. Das sind überprüfbare Modellberechnungen, keine generierten Marktgeschichten oder kausalen Erklärungen. Die Gewichte beziehen sich auf standardisierte Merkmale. Veränderte Skalierung, andere Daten und neue Testzeiträume schränken die Vergleichbarkeit ein. Ein gestiegener Testwert beweist keine verbesserte Profitabilität.
+**Analyse nachvollziehen:** tatsächliche Beiträge der vier Kursmerkmale zum logistischen Richtungsmodell. Das sind Modellberechnungen, keine kausalen Erklärungen künftiger Kurse.
 
-Die Historie beginnt nach Installation dieses Updates. Frühere Trainingsläufe wurden nicht gespeichert und werden nicht erfunden. Modellparameter werden protokolliert; automatisches Wiederherstellen alter Versionen als aktives Modell ist noch nicht implementiert. Nach einem Neustart wird wie bisher neu trainiert und eine neue Version protokolliert. Auch bei pausiertem Demohandel läuft die Datenanalyse weiter, sobald eine gültige MT5-Demoverbindung mit aktuellen Kursdaten besteht.
+**Lernjournal:** Zeitpunkt, Modellversion je Zeitebene, verwendete Kurs-/Trade-Beispiele, Gewichte, Änderungen und historische Testergebnisse. Null Trade-Beispiele heißt, dass kein Trade-Ergebnis in diesen Trainingslauf eingegangen ist. Nur ausreichend alte abgeschlossene Bot-Trades ergänzen das Training, damit der Testzeitraum getrennt bleibt. Trainingsläufe werden stündlich durchgeführt. Jede zusätzliche Erfahrung kann hilfreich oder irreführend sein und garantiert keine Verbesserung.
 
-**Update:** Dienst schließen, neue ZIP separat entpacken und `app.py`, `multiframe.py`, die neue Datei `learning.py` sowie den Ordner `static` aus der ZIP in den bisherigen Programmordner kopieren/ersetzen. `config.json`, `account.json` und `trades.sqlite` behalten. Mit `start.bat` starten und im Browser Strg+F5 drücken. Die neue Journal-Tabelle wird automatisch angelegt. Den Ordner `tests` bei Bedarf ebenfalls aktualisieren.
+Ältere Trades ohne getrennte Merkmale ergänzen nur M5. Das Journal beginnt mit der Version, die es eingeführt hat. Frühere ungespeicherte Läufe werden nicht erfunden. Die Kursmodelle werden beim Neustart neu trainiert; alte Parameter sind protokolliert, werden aber noch nicht automatisch als aktive Modelle wiederhergestellt.
 
-Das ist eine Erweiterung der Transparenz des vorhandenen ML-Prototyps. Eine umfassende selbstständig forschende Trading-KI mit Nachrichtenverständnis, automatischer Strategieentwicklung, belastbaren Backtests und nachgewiesenem Mehrwert ist damit noch nicht umgesetzt.
+## Daten und technische Grenzen
+
+- `trades.sqlite`: Trade-Journal, Kursmodell-Lernjournal, Tagesbasis und Forschungs-Zeitausstiegspläne.
+- `research.sqlite`: lokale KI-Analysen, Quellen, Hypothesen, Prüfungen und Referenzentwicklung.
+- `account.json`: lokale Kontobindung, keine Zugangsdaten.
+- `local_ai.json`: lokales Modell, Quellen, Kostenvorgaben und Forschungseinstellungen.
+
+Das Dashboard lauscht nur auf 127.0.0.1 und schützt Schreibaktionen mit einem Sitzungstoken. News-Downloads benötigen Internet; die Inferenz läuft lokal. RSS-Verfügbarkeit und Modellqualität können schwanken. Keine Garantie, dass jeder Vorschlag gültiges JSON liefert; ungültige Antworten werden angezeigt und verworfen.
+
+Die Simulation ist vereinfacht: keine vollständige Margin-/Lot-Rundungs-/Latenz-/Liquiditäts-/Portfolio-Simulation, keine detaillierten Broker-Fill-Regeln, keine Intrabar-Tickdaten. Reale MT5-Ausführungen können abweichen. Positionsgröße, Mindestabstände und Multi-Zeitebenenfilter verändern die tatsächlichen Trades gegenüber dem isolierten Strategietest. Forschungsergebnisse sind daher kein Nachweis der Profitabilität des kombinierten Systems.
+
+## Entwicklungstests
+
+`python -m unittest discover -s tests -v`
+
+Getestet werden unter anderem Risikolimits, Zeichenkodierung, zeitlich getrennte Daten, Quellenprüfung, ausschließlich lokale Sprachmodellanfragen, Strategieparameter, konservative Stopbehandlung, Kosten, Modellvergleich und Wiederverwendungssperre für Testzeiträume. Die Tests verwenden simulierte Modell-/Netzwerkantworten. Ollama auf deiner GPU, reale RSS-Abrufe und MT5-Orders müssen noch auf Windows geprüft werden. Der Entwicklungs-Sandbox fehlen die nötige Windows-/MT5-Laufzeit und ein lokales Ollama-Modell.

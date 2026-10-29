@@ -1,0 +1,13 @@
+{
+  "model": "qwen2.5:7b",
+  "require_research_for_entries": true,
+  "minimum_test_trades": 30,
+  "interval_minutes": 60,
+  "max_strategy_age_hours": 48,
+  "slippage_points": 5,
+  "commission_per_lot_round_trip": 0,
+  "sources": [
+    "https://www.federalreserve.gov/feeds/press_all.xml",
+    "https://www.bls.gov/feed/news_release/cpi.rss"
+  ]
+}

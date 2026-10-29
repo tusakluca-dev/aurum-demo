@@ -11,15 +11,21 @@ from urllib.parse import urlparse
 from core import features, zone_reason, position_size
 from multiframe import FrameLearner, feedback_by_frame, consensus
 from learning import init_journal, record_training, training_history
+from local_ai import load_settings, ResearchJournal, run_research, research_entry_reason
 
 ROOT = Path(__file__).resolve().parent
 TOKEN = secrets.token_urlsafe(32)
+AI_LOCK = threading.RLock()
+AI_EVENT = threading.Event()
+AI_INPUT = None
+AI_STATE = {'status': 'Lokale KI noch nicht gestartet', 'busy': False, 'result': None, 'history': []}
 LOCK = threading.RLock()
 STATE = {'running': False, 'status': 'Warte auf MT5', 'connected': False, 'model': None}
 DB = sqlite3.connect(ROOT/'trades.sqlite', check_same_thread=False)
 DB.execute('CREATE TABLE IF NOT EXISTS entries (ticket INTEGER PRIMARY KEY, position_id INTEGER, time REAL, direction INTEGER, features TEXT)')
 DB.execute('CREATE TABLE IF NOT EXISTS feedback (ticket INTEGER PRIMARY KEY, closed_at REAL, label REAL, features TEXT, pnl REAL)')
 DB.execute('CREATE TABLE IF NOT EXISTS daily (day TEXT, account TEXT, equity REAL, PRIMARY KEY(day, account))')
+DB.execute('CREATE TABLE IF NOT EXISTS execution_plans (position_id INTEGER PRIMARY KEY, signal_time REAL, hold_bars INTEGER, frame TEXT)')
 DB.commit()
 init_journal(DB)
 
@@ -38,7 +44,10 @@ def assert_demo(mt):
 def sync_feedback(mt, account_key):
     # Join fills by position_id, never infer trade results from individual close fills.
     rows = DB.execute('SELECT ticket, position_id, time, direction, features FROM entries WHERE ticket NOT IN (SELECT ticket FROM feedback)').fetchall()
-    active = {p.identifier for p in (mt.positions_get() or ())}
+    positions = mt.positions_get()
+    if positions is None:
+        raise RuntimeError('Offene Positionen für Trade-Auswertung nicht lesbar')
+    active = {p.identifier for p in positions}
     for ticket, pid, opened, direction, fs in rows:
         if not pid or pid in active:
             continue
@@ -55,7 +64,74 @@ def sync_feedback(mt, account_key):
     DB.commit()
 
 
+def research_worker():
+    journal = ResearchJournal(ROOT/'research.sqlite')
+    next_run = 0
+    while True:
+        forced = AI_EVENT.wait(5)
+        AI_EVENT.clear()
+        with AI_LOCK:
+            snapshot = AI_INPUT
+        if snapshot is None or (not forced and time.time() < next_run):
+            continue
+        try:
+            settings = load_settings(ROOT)
+            with AI_LOCK:
+                AI_STATE.update(busy=True, status='Lokales Sprachmodell analysiert Quellen und Strategieideen …')
+                if AI_STATE['result'] is None:
+                    stored = journal.history(snapshot['symbol'], snapshot['frame'])
+                    if stored:
+                        AI_STATE['result'] = stored[0]
+            result = run_research(settings, snapshot, journal)
+            with AI_LOCK:
+                AI_STATE.update(busy=False, result=result,
+                    status=('Neuer Strategietest abgeschlossen' if result['new_strategy_test'] else
+                            'Nachrichten aktualisiert; warte auf einen neuen unabhängigen Testzeitraum'),
+                    history=journal.history(snapshot['symbol'], snapshot['frame']))
+            next_run = time.time()+settings['interval_minutes']*60
+        except Exception as exc:
+            with AI_LOCK:
+                AI_STATE.update(busy=False,status='Lokale KI nicht bereit: '+str(exc))
+            next_run = time.time()+60
+
+
+def manage_research_exits(mt, cfg, expected_account):
+    positions = mt.positions_get(symbol=cfg['symbol'])
+    if positions is None:
+        raise RuntimeError('Positionen für Zeitausstiege nicht lesbar')
+    for position in positions:
+        if position.magic != cfg['magic']:
+            continue
+        plan = DB.execute('SELECT signal_time, hold_bars, frame FROM execution_plans WHERE position_id=?',
+                          (position.identifier,)).fetchone()
+        if not plan:
+            continue
+        rates = mt.copy_rates_from_pos(cfg['symbol'], getattr(mt, 'TIMEFRAME_'+plan[2]), 1, plan[1]+2)
+        if rates is None:
+            raise RuntimeError('Kerzen für Zeitausstieg nicht lesbar')
+        if sum(float(b['time']) > plan[0] for b in rates) < plan[1]:
+            continue
+        assert_demo(mt)
+        tick = mt.symbol_info_tick(cfg['symbol'])
+        info = mt.symbol_info(cfg['symbol'])
+        if tick is None or time.time()-tick.time > 60:
+            raise RuntimeError('Keine aktuellen Kurse für Zeitausstieg')
+        buy = position.type == mt.POSITION_TYPE_BUY
+        current = assert_demo(mt)
+        if f'{current.server}:{current.login}' != expected_account:
+            raise RuntimeError('Kontowechsel vor Zeitausstieg erkannt')
+        result = mt.order_send(dict(action=mt.TRADE_ACTION_DEAL, position=position.ticket,
+            symbol=cfg['symbol'], volume=position.volume,
+            type=mt.ORDER_TYPE_SELL if buy else mt.ORDER_TYPE_BUY,
+            price=tick.bid if buy else tick.ask, deviation=20, magic=cfg['magic'],
+            comment='Aurum research time exit', type_time=mt.ORDER_TIME_GTC,
+            type_filling=mt.ORDER_FILLING_FOK if info.filling_mode & 1 else mt.ORDER_FILLING_IOC))
+        if result is None or result.retcode != mt.TRADE_RETCODE_DONE:
+            raise RuntimeError('Zeitausstieg nicht vollständig bestätigt. Position in MT5 prüfen.')
+
+
 def worker():
+    global AI_INPUT
     try:
         import MetaTrader5 as mt
     except ImportError:
@@ -105,7 +181,7 @@ def worker():
                     if rates is None or len(rates) < 800:
                         reports[frame] = {'available': False, 'reason': 'Mindestens 800 geschlossene Kerzen nötig'}
                         continue
-                    fb = [{k: float(r[k]) for k in ('time', 'open', 'high', 'low', 'close')} for r in rates]
+                    fb = [dict({k: float(r[k]) for k in ('time', 'open', 'high', 'low', 'close')}, spread=float(r['spread'])*info.point) for r in rates]
                     report, vector = learner.evaluate(cfg['symbol'], frame, fb, feedback.get(frame, []))
                     reports[frame] = report
                     snapshots[frame] = vector
@@ -117,6 +193,25 @@ def worker():
                 atr = float(atrs[-1])
                 p, signal_reason = consensus(reports, execution, cfg['min_probability'], cfg['min_confirmations'])
                 model = reports[execution]
+                ai_settings = load_settings(ROOT)
+                unit_value = mt.order_calc_profit(mt.ORDER_TYPE_BUY, cfg['symbol'], 1., tick.ask, tick.ask+1.)
+                if unit_value is None or unit_value <= 0:
+                    raise RuntimeError('Kostenumrechnung für Strategietests fehlgeschlagen')
+                snapshot = dict(symbol=cfg['symbol'], frame=execution, bars=bars,
+                    direction=1 if p > .5 else -1,
+                    costs=dict(spread_fallback=tick.ask-tick.bid,
+                               slippage=ai_settings['slippage_points']*info.point,
+                               commission=ai_settings['commission_per_lot_round_trip']/unit_value),
+                    cost_assumptions=dict(slippage_points=ai_settings['slippage_points'],
+                        commission_per_lot_round_trip=ai_settings['commission_per_lot_round_trip'],
+                        note='Kommission ist eine Nutzervorgabe, keine automatisch ermittelte Brokergebühr.'))
+                with AI_LOCK:
+                    AI_INPUT = snapshot
+                    research_result = AI_STATE['result']
+                ai_reason = research_entry_reason(ai_settings, research_result, snapshot)
+                selected_strategy = (research_result['evaluation']['selected']
+                    if ai_settings['require_research_for_entries'] and research_result else None)
+                manage_research_exits(mt, cfg, key)
                 day = datetime.now(timezone.utc).date().isoformat()
                 DB.execute('INSERT OR IGNORE INTO daily VALUES (?, ?, ?)', (day, key, account.equity))
                 baseline = DB.execute('SELECT equity FROM daily WHERE day=? AND account=?', (day, key)).fetchone()[0]
@@ -127,7 +222,7 @@ def worker():
                 reason = zone_reason(cfg, tick.ask, tick.ask-tick.bid, atr)
                 if baseline <= 0 or account.equity <= baseline*(1-cfg['daily_loss_percent']/100):
                     reason = 'Tagesverlustgrenze erreicht'
-                reason = reason or signal_reason
+                reason = reason or signal_reason or ai_reason
                 if positions:
                     reason = 'Position im Symbol bereits offen'
                 STATE.update(connected=True, symbol=cfg['symbol'], balance=account.balance,
@@ -146,9 +241,9 @@ def worker():
                     direction = 1 if p > 0.5 else -1
                     kind = mt.ORDER_TYPE_BUY if direction == 1 else mt.ORDER_TYPE_SELL
                     price = tick.ask if direction == 1 else tick.bid
-                    distance = max(atr*cfg['stop_atr'], (info.trade_stops_level+2)*info.point)
+                    distance = max(atr*(selected_strategy['stop_atr'] if selected_strategy else cfg['stop_atr']), (info.trade_stops_level+2)*info.point)
                     stop = round(price-direction*distance, info.digits)
-                    take = round(price+direction*distance*cfg['reward_risk'], info.digits)
+                    take = round(price+direction*distance*(selected_strategy['reward_risk'] if selected_strategy else cfg['reward_risk']), info.digits)
                     loss = mt.order_calc_profit(kind, cfg['symbol'], 1.0, price, stop)
                     if loss is None:
                         raise RuntimeError('Risikoberechnung fehlgeschlagen.')
@@ -180,6 +275,9 @@ def worker():
                         pid = fills[0].position_id if fills else result.order
                         DB.execute('INSERT OR IGNORE INTO entries VALUES (?, ?, ?, ?, ?)',
                                    (result.order, pid, time.time(), direction, json.dumps(snapshots)))
+                        if selected_strategy:
+                            DB.execute('INSERT OR REPLACE INTO execution_plans VALUES (?, ?, ?, ?)',
+                                       (pid, bar_time, selected_strategy['max_hold_bars'], execution))
                         DB.commit()
                         STATE['status'] = 'Demo-Order ausgeführt'
         except Exception as exc:
@@ -207,6 +305,9 @@ class Handler(BaseHTTPRequestHandler):
         if not self.valid_host():
             return self.send(403, b'{}')
         path = urlparse(self.path).path
+        if path == '/api/research':
+            with AI_LOCK:
+                return self.send(200, json.dumps(AI_STATE, ensure_ascii=False).encode('utf-8'))
         if path == '/api/learning':
             with LOCK:
                 return self.send(200, json.dumps(training_history(DB), ensure_ascii=False).encode('utf-8'))
@@ -221,6 +322,9 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if not self.valid_host() or not secrets.compare_digest(self.headers.get('X-Token', ''), TOKEN):
             return self.send(403, b'{}')
+        if self.path == '/api/research':
+            AI_EVENT.set()
+            return self.send(202, b'{"queued":true}')
         with LOCK:
             if self.path == '/api/start' and STATE['connected']:
                 STATE['running'] = True
@@ -233,5 +337,6 @@ class Handler(BaseHTTPRequestHandler):
 
 if __name__ == '__main__':
     threading.Thread(target=worker, daemon=True).start()
+    threading.Thread(target=research_worker, daemon=True).start()
     print('Aurum Demo: http://127.0.0.1:8765 — Strg+C beendet den Dienst.')
     ThreadingHTTPServer(('127.0.0.1', 8765), Handler).serve_forever()

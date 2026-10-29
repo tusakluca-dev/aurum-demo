@@ -79,6 +79,14 @@ Das Demokonto wird vor Orders geprüft, Kontowechsel werden gesperrt. Höchstens
 
 **Autopilot stoppen** lässt Positionsverwaltung und SL/TP aktiv. Vorübergehende Verbindungsprobleme sperren Einstiege; nach Wiederherstellung wird ein angeforderter Autopilot automatisch wieder bereit. Ein unklarer Orderstatus führt zu einem dauerhaft gespeicherten Halt. Dann MT5 prüfen und den Autopiloten ausdrücklich neu aktivieren. Offene Positionen bei Bedarf direkt in MT5 schließen. Änderungen von Symbol und Zeitebenen nur ohne offene Bot-Positionen vornehmen. Eine Installation gehört zu einem Konto.
 
+### Lotgröße selbst im Dashboard wählen
+
+Im Bereich **Positionsgröße einstellen** den Modus wählen, bei **Feste Lotgröße** zum Beispiel `0,10`, `0.10` oder `1,00` eingeben und **Lot-Einstellung speichern** anklicken. Gespeichert wird in `trades.sqlite`; die Auswahl bleibt beim Neustart erhalten und wird von der KI nicht verändert. Sie gilt ab dem nächsten neuen Trade. Offene Positionen werden nicht umskaliert.
+
+Im Modus **Automatisch nach Risikobudget** bleibt die bisherige risikobasierte Berechnung aktiv. Im Modus **Feste Lotgröße** bestimmt deine Eingabe die Positionsgröße anstelle des automatischen Risikobudgets je Trade. Dadurch kann das Stop-Risiko höher als die eingestellten 0,25 % sein. Der geschätzte Verlust am aktuellen Stop und der Anteil an der Equity werden angezeigt; Gebühren, Slippage und Kurslücken sind in dieser Vorschau nicht enthalten. Es handelt sich nicht um eine Verlustgarantie oder um die Zusage eines bevorstehenden Einstiegs.
+
+Mindestlot, Höchstlot und Schrittweite des Brokers werden angezeigt und validiert, sobald MT5-Daten verfügbar sind. Ungültige Werte werden nicht automatisch gerundet. Ohne Verbindung lässt sich ein positiver Wert vormerken; vor einer Order wird er gegen die aktuellen Brokergrenzen geprüft. Tagesverlustgrenze, Demokontoprüfung, Modell-/Strategieprüfungen, Stop-Loss und Marginprüfung bleiben aktiv. Der neue Bereich erfordert die aktuelle `app.py`, das neue Modul `sizing.py` und die aktuelle `static/index.html`; am einfachsten den vollständigen ZIP-Ordner nach der Update-Anleitung verwenden.
+
 ### No-Trading-Zonen
 
 In `config.json`:

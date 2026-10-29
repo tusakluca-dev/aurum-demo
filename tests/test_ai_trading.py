@@ -50,7 +50,7 @@ class WorkerTests(unittest.TestCase):
             return types.SimpleNamespace(order=1,deal=2,retcode=10009)
         mt.order_send=send
         return mt
-    def run_tick(self, result, requested=True, initial_fail=False, ambiguous=False):
+    def run_tick(self, result, requested=True, initial_fail=False, ambiguous=False, fixed_lot=None):
         db=sqlite3.connect(':memory:')
         app=self.load_app(db)
         mt=self.fake_terminal()
@@ -60,6 +60,8 @@ class WorkerTests(unittest.TestCase):
         if ambiguous:
             mt.order_send=lambda order:None
         app.AUTOPILOT.request(requested)
+        if fixed_lot is not None:
+            app.SIZING.save('fixed',fixed_lot)
         cfg=json.loads((ROOT/'config.json').read_text(encoding='utf-8'))
         cfg.update(timeframes=['M5','H1'],blocked_hours_utc=[])
         cfg['max_spread_atr']=1
@@ -146,4 +148,16 @@ class WorkerTests(unittest.TestCase):
             self.assertFalse(app.AUTOPILOT.state()['armed'])
             self.assertIn('Orderstatus',app.AUTOPILOT.state()['halt_reason'])
             self.assertEqual(db.execute('SELECT COUNT(*) FROM order_attempts').fetchone()[0],1)
+        finally:db.close()
+
+    def test_user_selected_fixed_one_lot_reaches_order_request(self):
+        now=time.time()
+        result=dict(symbol='XAUUSD',frame='M5',created_at=now,evaluated_at=now,
+            costs=dict(slippage=.05,commission=0),proposal=dict(risk='normal'),
+            evaluation=dict(selected=dict(DEFAULT_STRATEGY)))
+        app,mt,db=self.run_tick(result,fixed_lot='1,00')
+        try:
+            self.assertEqual(mt.orders[0]['volume'],1.)
+            self.assertEqual(app.STATE['sizing_preview']['volume'],1.)
+            self.assertGreater(app.STATE['sizing_preview']['estimated_risk_percent'],.25)
         finally:db.close()

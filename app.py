@@ -8,11 +8,12 @@ from datetime import datetime, timezone, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
-from core import features, zone_reason, position_size
+from core import features, zone_reason
 from multiframe import FrameLearner, feedback_by_frame, consensus
 from learning import init_journal, record_training, training_history
 from local_ai import load_settings, ResearchJournal, run_research, research_entry_reason
 from automation import Autopilot
+from sizing import SizingPreferences, selected_volume
 
 ROOT = Path(__file__).resolve().parent
 TOKEN = secrets.token_urlsafe(32)
@@ -30,6 +31,7 @@ DB.execute('CREATE TABLE IF NOT EXISTS execution_plans (position_id INTEGER PRIM
 DB.commit()
 init_journal(DB)
 AUTOPILOT = Autopilot(DB)
+SIZING = SizingPreferences(DB)
 
 
 def config():
@@ -216,6 +218,30 @@ def worker():
                 selected_strategy = (research_result['evaluation']['selected']
                     if ai_settings['require_research_for_entries'] and research_result else None)
                 manage_research_exits(mt, cfg, key)
+                preferences = SIZING.get()
+                limits = dict(min=info.volume_min, max=info.volume_max, step=info.volume_step)
+                direction = 1 if p > 0.5 else -1
+                kind = mt.ORDER_TYPE_BUY if direction == 1 else mt.ORDER_TYPE_SELL
+                price = tick.ask if direction == 1 else tick.bid
+                distance = max(atr*(selected_strategy['stop_atr'] if selected_strategy else cfg['stop_atr']), (info.trade_stops_level+2)*info.point)
+                stop = round(price-direction*distance, info.digits)
+                take = round(price+direction*distance*(selected_strategy['reward_risk'] if selected_strategy else cfg['reward_risk']), info.digits)
+                loss = mt.order_calc_profit(kind, cfg['symbol'], 1.0, price, stop)
+                if loss is None:
+                    raise RuntimeError('Risikoberechnung fehlgeschlagen.')
+                sizing_reason = None
+                try:
+                    volume = selected_volume(preferences, account.equity*cfg['risk_percent']/100, abs(loss), limits)
+                    if volume <= 0:
+                        sizing_reason = 'Mindestlot überschreitet Risikobudget'
+                except ValueError as exc:
+                    volume = 0.
+                    sizing_reason = str(exc)
+                STATE.update(volume_limits=limits, sizing=preferences, sizing_preview=dict(
+                    volume=volume, estimated_stop_loss=volume*abs(loss),
+                    estimated_risk_percent=volume*abs(loss)/account.equity*100 if account.equity > 0 else None,
+                    auto_risk_percent=cfg['risk_percent'], error=sizing_reason,
+                    note='Schätzung für den aktuellen Stop, ohne Gebühren, Slippage und Kurslücken.'))
                 day = datetime.now(timezone.utc).date().isoformat()
                 DB.execute('INSERT OR IGNORE INTO daily VALUES (?, ?, ?)', (day, key, account.equity))
                 baseline = DB.execute('SELECT equity FROM daily WHERE day=? AND account=?', (day, key)).fetchone()[0]
@@ -226,7 +252,7 @@ def worker():
                 reason = zone_reason(cfg, tick.ask, tick.ask-tick.bid, atr)
                 if baseline <= 0 or account.equity <= baseline*(1-cfg['daily_loss_percent']/100):
                     reason = 'Tagesverlustgrenze erreicht'
-                reason = reason or signal_reason or ai_reason
+                reason = reason or signal_reason or ai_reason or sizing_reason
                 if positions:
                     reason = 'Position im Symbol bereits offen'
                 STATE['running'] = intent['armed']
@@ -248,17 +274,6 @@ def worker():
                     if not AUTOPILOT.claim_bar(cfg['symbol'], execution, bar_time):
                         STATE['status'] = 'Orderversuch für diese Kerze bereits gespeichert'
                         continue
-                    direction = 1 if p > 0.5 else -1
-                    kind = mt.ORDER_TYPE_BUY if direction == 1 else mt.ORDER_TYPE_SELL
-                    price = tick.ask if direction == 1 else tick.bid
-                    distance = max(atr*(selected_strategy['stop_atr'] if selected_strategy else cfg['stop_atr']), (info.trade_stops_level+2)*info.point)
-                    stop = round(price-direction*distance, info.digits)
-                    take = round(price+direction*distance*(selected_strategy['reward_risk'] if selected_strategy else cfg['reward_risk']), info.digits)
-                    loss = mt.order_calc_profit(kind, cfg['symbol'], 1.0, price, stop)
-                    if loss is None:
-                        raise RuntimeError('Risikoberechnung fehlgeschlagen.')
-                    volume = position_size(account.equity*cfg['risk_percent']/100, abs(loss),
-                                           info.volume_min, info.volume_max, info.volume_step)
                     if not volume:
                         STATE['status'] = 'Mindestlot überschreitet Risikobudget'
                     else:
@@ -322,6 +337,10 @@ class Handler(BaseHTTPRequestHandler):
         if not self.valid_host():
             return self.send(403, b'{}')
         path = urlparse(self.path).path
+        if path == '/api/sizing':
+            with LOCK:
+                return self.send(200, json.dumps(dict(preferences=SIZING.get(), broker=STATE.get('volume_limits'),
+                    preview=STATE.get('sizing_preview')), ensure_ascii=False).encode('utf-8'))
         if path == '/api/research':
             with AI_LOCK:
                 return self.send(200, json.dumps(AI_STATE, ensure_ascii=False).encode('utf-8'))
@@ -339,6 +358,21 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if not self.valid_host() or not secrets.compare_digest(self.headers.get('X-Token', ''), TOKEN):
             return self.send(403, b'{}')
+        if self.path == '/api/sizing':
+            try:
+                length = int(self.headers.get('Content-Length', '0'))
+                if not 0 < length <= 4096:
+                    raise ValueError('Ungültige Größe der Anfrage.')
+                data = json.loads(self.rfile.read(length).decode('utf-8'))
+                if not isinstance(data, dict):
+                    raise ValueError('Ungültige Einstellungen.')
+                with LOCK:
+                    saved = SIZING.save(data.get('mode'), data.get('fixed_lot'), STATE.get('volume_limits'))
+                    STATE['sizing'] = saved
+                    STATE.pop('sizing_preview', None)
+                return self.send(200, json.dumps(dict(preferences=saved), ensure_ascii=False).encode('utf-8'))
+            except (ValueError, TypeError) as exc:
+                return self.send(400, json.dumps(dict(error=str(exc)), ensure_ascii=False).encode('utf-8'))
         if self.path == '/api/research':
             AI_EVENT.set()
             return self.send(202, b'{"queued":true}')

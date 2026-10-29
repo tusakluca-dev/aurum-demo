@@ -1,0 +1,27 @@
+{
+  "symbol": "XAUUSD",
+  "risk_percent": 0.25,
+  "daily_loss_percent": 2.0,
+  "max_spread_atr": 0.12,
+  "min_probability": 0.65,
+  "stop_atr": 2.0,
+  "reward_risk": 1.5,
+  "blocked_hours_utc": [
+    21,
+    22
+  ],
+  "price_zones": [],
+  "blocked_windows_utc": [],
+  "magic": 2601029,
+  "timeframes": [
+    "M1",
+    "M5",
+    "M15",
+    "M30",
+    "H1",
+    "H4",
+    "D1"
+  ],
+  "execution_timeframe": "M5",
+  "min_confirmations": 2
+}

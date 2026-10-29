@@ -55,3 +55,15 @@ Das Ausführungsmodell muss den Test bestehen und ein ausreichend starkes Signal
 Der Dashboard-Kurschart zeigt die Ausführungszeitebene; die Modellübersicht zeigt Status und Prognose aller konfigurierten Zeitebenen. Das Umschalten eines Charts in MT5 ändert die Konfiguration des Bots nicht. Änderungen an `timeframes` oder `execution_timeframe` bitte pausiert vornehmen und die Anwendung danach neu starten.
 
 Bestehende Journale werden unterstützt: Ältere Trades enthalten nur M5-Merkmale und ergänzen ausschließlich das M5-Modell. Neue Trades speichern getrennte Merkmalsvektoren je verfügbarer Zeitebene. Es werden weiterhin ausschließlich das konfigurierte Goldsymbol und ein Demokonto gehandelt, keine weiteren Instrumente automatisch hinzugefügt.
+
+
+## Update bei falsch dargestellten Umlauten (Windows)
+
+Die Version mit expliziter UTF-8-Kodierung behebt falsche Umlaute, Trennzeichen und Pfeile im gesamten Dashboard. Ursache war das Einlesen der UTF-8-HTML-Datei mit der Windows-Standardkodierung. Auch JSON-Antworten und die Windows-Konsole verwenden nun ausdrücklich UTF-8.
+
+1. Im Dashboard neue Einstiege stoppen. Das Konsolenfenster anschließend schließen. Offene Positionen weiterhin in MT5 kontrollieren.
+2. Die aktuelle ZIP von GitHub herunterladen und in einen separaten Ordner entpacken.
+3. Aus dem neuen Ordner nur `app.py` und `start.bat` in den bisherigen Programmordner kopieren und ersetzen. `config.json`, `account.json` und `trades.sqlite` behalten, damit Einstellungen und Journal erhalten bleiben.
+4. `start.bat` im bisherigen Ordner starten, dann im Browser **Strg+F5** drücken. Falls die Seite zu früh geöffnet wurde, nach dem Start nochmals neu laden.
+
+Die Korrektur verändert keine Handelsfilter oder Modellschwellen. Eine Meldung über nicht bestandene Modellvalidierung ist weiterhin eine eigenständige Einstiegssperre.

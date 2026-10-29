@@ -23,7 +23,7 @@ DB.commit()
 
 
 def config():
-    return json.loads((ROOT/'config.json').read_text(encoding='utf-8'))
+    return json.loads((ROOT/'config.json').read_text(encoding='utf-8-sig'))
 
 
 def assert_demo(mt):
@@ -71,10 +71,10 @@ def worker():
                 account = assert_demo(mt)
                 key = f'{account.server}:{account.login}'
                 saved = ROOT/'account.json'
-                if saved.exists() and json.loads(saved.read_text())['account'] != key:
+                if saved.exists() and json.loads(saved.read_text(encoding='utf-8-sig'))['account'] != key:
                     raise RuntimeError('Anderes Konto erkannt. Eigene Installation pro Demokonto verwenden.')
                 if not saved.exists():
-                    saved.write_text(json.dumps({'account': key}))
+                    saved.write_text(json.dumps({'account': key}), encoding='utf-8')
                 if bound_account and key != bound_account:
                     STATE['running'] = False
                     raise RuntimeError('Konto gewechselt. Anwendung neu starten.')
@@ -189,7 +189,7 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *_):
         pass
 
-    def send(self, code, data, mime='application/json'):
+    def send(self, code, data, mime='application/json; charset=utf-8'):
         self.send_response(code)
         self.send_header('Content-Type', mime)
         self.send_header('Cache-Control', 'no-store')
@@ -206,10 +206,10 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         if path == '/api/status':
             with LOCK:
-                return self.send(200, json.dumps(STATE).encode())
+                return self.send(200, json.dumps(STATE, ensure_ascii=False).encode('utf-8'))
         if path == '/':
-            html = (ROOT/'static/index.html').read_text().replace('__TOKEN__', TOKEN)
-            return self.send(200, html.encode(), 'text/html; charset=utf-8')
+            html = (ROOT/'static/index.html').read_text(encoding='utf-8').replace('__TOKEN__', TOKEN)
+            return self.send(200, html.encode('utf-8'), 'text/html; charset=utf-8')
         self.send(404, b'{}')
 
     def do_POST(self):
@@ -222,7 +222,7 @@ class Handler(BaseHTTPRequestHandler):
                 STATE['running'] = False
             else:
                 return self.send(409, b'{"error":"MT5-Verbindung fehlt"}')
-            self.send(200, json.dumps({'running': STATE['running']}).encode())
+            self.send(200, json.dumps({'running': STATE['running']}).encode('utf-8'))
 
 
 if __name__ == '__main__':

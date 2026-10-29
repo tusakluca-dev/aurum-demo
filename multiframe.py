@@ -1,6 +1,7 @@
 """Independent models per MT5 timeframe, with explicit abstention."""
 import time
 from core import features, train, probability
+from learning import training_details, explain_features
 
 
 def feedback_by_frame(rows):
@@ -17,20 +18,27 @@ def feedback_by_frame(rows):
 
 
 class FrameLearner:
-    def __init__(self):
+    def __init__(self, recorder=None):
         self.models = {}
+        self.recorder = recorder
+        self.audits = {}
 
     def evaluate(self, symbol, frame, bars, feedback):
         key = (symbol, frame)
         cached = self.models.get(key)
         if cached is None or time.time()-cached[0] >= 3600:
             cached = (time.time(), train(bars, feedback))
+            details = training_details(cached[1], bars, feedback)
+            if self.recorder:
+                details = self.recorder(symbol, frame, cached[0], details)
+            self.audits[key] = details
             self.models[key] = cached
         model = cached[1]
         x, _ = features(bars)
         report = {k: model[k] for k in ('score', 'samples', 'validation_samples', 'approved')}
         report.update(available=True, probability=probability(model, x[-1]),
-                      last_closed_bar=bars[-1]['time'], trained_at=cached[0])
+                      last_closed_bar=bars[-1]['time'], trained_at=cached[0],
+                      learning=self.audits[key], influences=explain_features(model, x[-1]))
         return report, x[-1].tolist()
 
 

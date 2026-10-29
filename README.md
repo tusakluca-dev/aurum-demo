@@ -67,3 +67,18 @@ Die Version mit expliziter UTF-8-Kodierung behebt falsche Umlaute, Trennzeichen 
 4. `start.bat` im bisherigen Ordner starten, dann im Browser **Strg+F5** drücken. Falls die Seite zu früh geöffnet wurde, nach dem Start nochmals neu laden.
 
 Die Korrektur verändert keine Handelsfilter oder Modellschwellen. Eine Meldung über nicht bestandene Modellvalidierung ist weiterhin eine eigenständige Einstiegssperre.
+
+
+## Lernjournal und nachvollziehbare Analyse
+
+Unter dem bisherigen Dashboard stehen nun **Analyse nachvollziehen** und **Lernjournal**. Die Zeitebene der Erklärung ist auswählbar; das automatische Demotrading verwendet weiterhin die vorhandenen Prüfungen.
+
+Das Journal speichert echte Trainingsläufe dauerhaft in einer zusätzlichen Tabelle von `trades.sqlite`: Version je Symbol/Zeitebene, Zeitpunkt, Anzahl von Kurs- und tatsächlich verwendeten Trade-Beispielen, Testwert, Modellgewichte, Normalisierung und Änderungen gegenüber dem vorherigen Lauf. Ein JSON-Export enthält die letzten 40 Trainingsläufe einschließlich Modellparametern. Die Datenbasis ist weiterhin die verfügbare Kurshistorie plus die älteren abgeschlossenen Bot-Trades, nicht jede historische Trade-Entscheidung des Nutzers. `0 Trade-Beispiele` bedeutet, dass dieser Lauf noch keine Trade-Erfahrung verwendet hat.
+
+Die aktuelle Analyse zeigt die exakten Beiträge der vier Kursmerkmale zum logistischen Modellwert (Log-Odds). Positive Beiträge erhöhen die berechnete Wahrscheinlichkeit eines Kursanstiegs gegenüber dem Basiswert; negative senken sie. Das sind überprüfbare Modellberechnungen, keine generierten Marktgeschichten oder kausalen Erklärungen. Die Gewichte beziehen sich auf standardisierte Merkmale. Veränderte Skalierung, andere Daten und neue Testzeiträume schränken die Vergleichbarkeit ein. Ein gestiegener Testwert beweist keine verbesserte Profitabilität.
+
+Die Historie beginnt nach Installation dieses Updates. Frühere Trainingsläufe wurden nicht gespeichert und werden nicht erfunden. Modellparameter werden protokolliert; automatisches Wiederherstellen alter Versionen als aktives Modell ist noch nicht implementiert. Nach einem Neustart wird wie bisher neu trainiert und eine neue Version protokolliert. Auch bei pausiertem Demohandel läuft die Datenanalyse weiter, sobald eine gültige MT5-Demoverbindung mit aktuellen Kursdaten besteht.
+
+**Update:** Dienst schließen, neue ZIP separat entpacken und `app.py`, `multiframe.py`, die neue Datei `learning.py` sowie den Ordner `static` aus der ZIP in den bisherigen Programmordner kopieren/ersetzen. `config.json`, `account.json` und `trades.sqlite` behalten. Mit `start.bat` starten und im Browser Strg+F5 drücken. Die neue Journal-Tabelle wird automatisch angelegt. Den Ordner `tests` bei Bedarf ebenfalls aktualisieren.
+
+Das ist eine Erweiterung der Transparenz des vorhandenen ML-Prototyps. Eine umfassende selbstständig forschende Trading-KI mit Nachrichtenverständnis, automatischer Strategieentwicklung, belastbaren Backtests und nachgewiesenem Mehrwert ist damit noch nicht umgesetzt.

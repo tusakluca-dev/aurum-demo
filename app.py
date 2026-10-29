@@ -10,6 +10,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 from core import features, zone_reason, position_size
 from multiframe import FrameLearner, feedback_by_frame, consensus
+from learning import init_journal, record_training, training_history
 
 ROOT = Path(__file__).resolve().parent
 TOKEN = secrets.token_urlsafe(32)
@@ -20,6 +21,7 @@ DB.execute('CREATE TABLE IF NOT EXISTS entries (ticket INTEGER PRIMARY KEY, posi
 DB.execute('CREATE TABLE IF NOT EXISTS feedback (ticket INTEGER PRIMARY KEY, closed_at REAL, label REAL, features TEXT, pnl REAL)')
 DB.execute('CREATE TABLE IF NOT EXISTS daily (day TEXT, account TEXT, equity REAL, PRIMARY KEY(day, account))')
 DB.commit()
+init_journal(DB)
 
 
 def config():
@@ -60,7 +62,8 @@ def worker():
         with LOCK:
             STATE['status'] = 'Windows + MetaTrader5-Paket erforderlich. Siehe README.'
         return
-    learner = FrameLearner()
+    learner = FrameLearner(lambda symbol, frame, at, details:
+                           record_training(DB, symbol, frame, at, details))
     last_bar, bound_account = None, None
     while True:
         try:
@@ -204,6 +207,9 @@ class Handler(BaseHTTPRequestHandler):
         if not self.valid_host():
             return self.send(403, b'{}')
         path = urlparse(self.path).path
+        if path == '/api/learning':
+            with LOCK:
+                return self.send(200, json.dumps(training_history(DB), ensure_ascii=False).encode('utf-8'))
         if path == '/api/status':
             with LOCK:
                 return self.send(200, json.dumps(STATE, ensure_ascii=False).encode('utf-8'))

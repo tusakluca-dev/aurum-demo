@@ -47,6 +47,22 @@ class EncodingTests(unittest.TestCase):
         self.assertIn('application/json; charset=utf-8', header)
         self.assertEqual(json.loads(body.decode('utf-8'))['status'], message)
 
+    def test_learning_endpoint_returns_real_persisted_runs(self):
+        import sqlite3
+        from learning import init_journal, record_training
+        db = sqlite3.connect(':memory:')
+        try:
+            init_journal(db)
+            details = dict(score=.6, weights=[0, 1, 2, 3, 4])
+            record_training(db, 'XAUUSD', 'M5', 1, details)
+            with patch.object(app, 'DB', db):
+                header, body = self.request('/api/learning')
+            self.assertIn('application/json; charset=utf-8', header)
+            self.assertEqual(json.loads(body)[0]['version'], 1)
+            self.assertEqual(json.loads(body)[0]['frame'], 'M5')
+        finally:
+            db.close()
+
     def test_config_accepts_windows_utf8_bom(self):
         import tempfile
         with tempfile.TemporaryDirectory() as folder:

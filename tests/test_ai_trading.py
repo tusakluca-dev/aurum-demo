@@ -50,10 +50,16 @@ class WorkerTests(unittest.TestCase):
             return types.SimpleNamespace(order=1,deal=2,retcode=10009)
         mt.order_send=send
         return mt
-    def run_tick(self, result):
+    def run_tick(self, result, requested=True, initial_fail=False, ambiguous=False):
         db=sqlite3.connect(':memory:')
         app=self.load_app(db)
         mt=self.fake_terminal()
+        if initial_fail:
+            initializations=iter([False,True])
+            mt.initialize=lambda:next(initializations)
+        if ambiguous:
+            mt.order_send=lambda order:None
+        app.AUTOPILOT.request(requested)
         cfg=json.loads((ROOT/'config.json').read_text(encoding='utf-8'))
         cfg.update(timeframes=['M5','H1'],blocked_hours_utc=[])
         cfg['max_spread_atr']=1
@@ -64,7 +70,7 @@ class WorkerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder, patch.object(app,'ROOT',Path(folder)), \
              patch.object(app,'config',return_value=cfg),patch.object(app,'FrameLearner',Learner), \
              patch.object(app,'load_settings',return_value=DEFAULTS), \
-             patch.dict(sys.modules,{'MetaTrader5':mt}), patch.object(app.time,'sleep',side_effect=EndIteration):
+             patch.dict(sys.modules,{'MetaTrader5':mt}), patch.object(app.time,'sleep',side_effect=[None,EndIteration] if initial_fail else EndIteration):
             app.STATE['running']=True
             app.AI_STATE['result']=result
             with self.assertRaises(EndIteration):app.worker()
@@ -112,4 +118,32 @@ class WorkerTests(unittest.TestCase):
         try:
             with self.assertRaisesRegex(RuntimeError,'Demokonto'):app.manage_research_exits(mt,cfg,'Demo:1')
             self.assertEqual(mt.orders,[])
+        finally:db.close()
+
+    def test_autopilot_recovers_after_temporary_disconnect(self):
+        app,mt,db=self.run_tick(None,initial_fail=True)
+        try:
+            self.assertTrue(app.STATE['connected'])
+            self.assertTrue(app.STATE['running'])
+            self.assertTrue(app.AUTOPILOT.state()['requested'])
+        finally:db.close()
+    def test_manual_stop_is_not_overridden_by_reconnect(self):
+        app,mt,db=self.run_tick(None,requested=False,initial_fail=True)
+        try:
+            self.assertTrue(app.STATE['connected'])
+            self.assertFalse(app.STATE['running'])
+            self.assertFalse(app.AUTOPILOT.state()['requested'])
+            self.assertEqual(mt.orders,[])
+        finally:db.close()
+    def test_ambiguous_order_persistently_halts_autopilot(self):
+        now=time.time()
+        result=dict(symbol='XAUUSD',frame='M5',created_at=now,evaluated_at=now,
+            costs=dict(slippage=.05,commission=0),proposal=dict(risk='normal'),
+            evaluation=dict(selected=dict(DEFAULT_STRATEGY)))
+        app,mt,db=self.run_tick(result,ambiguous=True)
+        try:
+            self.assertFalse(app.STATE['running'])
+            self.assertFalse(app.AUTOPILOT.state()['armed'])
+            self.assertIn('Orderstatus',app.AUTOPILOT.state()['halt_reason'])
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM order_attempts').fetchone()[0],1)
         finally:db.close()

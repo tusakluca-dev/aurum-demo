@@ -12,6 +12,7 @@ from core import features, zone_reason, position_size
 from multiframe import FrameLearner, feedback_by_frame, consensus
 from learning import init_journal, record_training, training_history
 from local_ai import load_settings, ResearchJournal, run_research, research_entry_reason
+from automation import Autopilot
 
 ROOT = Path(__file__).resolve().parent
 TOKEN = secrets.token_urlsafe(32)
@@ -28,6 +29,7 @@ DB.execute('CREATE TABLE IF NOT EXISTS daily (day TEXT, account TEXT, equity REA
 DB.execute('CREATE TABLE IF NOT EXISTS execution_plans (position_id INTEGER PRIMARY KEY, signal_time REAL, hold_bars INTEGER, frame TEXT)')
 DB.commit()
 init_journal(DB)
+AUTOPILOT = Autopilot(DB)
 
 
 def config():
@@ -144,6 +146,8 @@ def worker():
     while True:
         try:
             with LOCK:
+                intent = AUTOPILOT.state()
+                STATE.update(trading_requested=intent['requested'], halt_reason=intent['halt_reason'])
                 cfg = config()
                 if not mt.initialize():
                     raise RuntimeError('MT5 nicht erreichbar. Terminal öffnen und Demokonto anmelden.')
@@ -225,6 +229,9 @@ def worker():
                 reason = reason or signal_reason or ai_reason
                 if positions:
                     reason = 'Position im Symbol bereits offen'
+                STATE['running'] = intent['armed']
+                if intent['halt_reason']:
+                    reason = intent['halt_reason']
                 STATE.update(connected=True, symbol=cfg['symbol'], balance=account.balance,
                              equity=account.equity, bid=tick.bid, ask=tick.ask,
                              probability=p, atr=atr, positions=len(positions),
@@ -238,6 +245,9 @@ def worker():
                 if STATE['running'] and not reason and bar_time != last_bar:
                     # Consume the bar before sending: never retry an ambiguous order outcome.
                     last_bar = bar_time
+                    if not AUTOPILOT.claim_bar(cfg['symbol'], execution, bar_time):
+                        STATE['status'] = 'Orderversuch für diese Kerze bereits gespeichert'
+                        continue
                     direction = 1 if p > 0.5 else -1
                     kind = mt.ORDER_TYPE_BUY if direction == 1 else mt.ORDER_TYPE_SELL
                     price = tick.ask if direction == 1 else tick.bid
@@ -267,10 +277,15 @@ def worker():
                             raise RuntimeError('Kontowechsel vor Order erkannt.')
                         if fresh.equity <= baseline*(1-cfg['daily_loss_percent']/100):
                             raise RuntimeError('Tagesverlustgrenze vor Order erreicht.')
-                        result = mt.order_send(request)
+                        try:
+                            result = mt.order_send(request)
+                        except Exception:
+                            AUTOPILOT.halt('Unklarer Orderstatus: MT5 prüfen, dann Demohandel ausdrücklich neu starten.')
+                            raise
                         if result is None or result.retcode not in (mt.TRADE_RETCODE_DONE, mt.TRADE_RETCODE_DONE_PARTIAL):
-                            STATE['running'] = False
-                            raise RuntimeError('Order nicht bestätigt; pausiert. MT5 prüfen: '+str(getattr(result, 'comment', mt.last_error())))
+                            if result is None or result.retcode in (10008, 10012, 10031):
+                                AUTOPILOT.halt('Unklarer Orderstatus: MT5 prüfen, dann Demohandel ausdrücklich neu starten.')
+                            raise RuntimeError('Order nicht ausgeführt/bestätigt: '+str(getattr(result, 'comment', mt.last_error())))
                         fills = mt.history_deals_get(ticket=result.deal)
                         pid = fills[0].position_id if fills else result.order
                         DB.execute('INSERT OR IGNORE INTO entries VALUES (?, ?, ?, ?, ?)',
@@ -282,7 +297,9 @@ def worker():
                         STATE['status'] = 'Demo-Order ausgeführt'
         except Exception as exc:
             with LOCK:
-                STATE.update(connected=False, running=False, status=str(exc))
+                intent = AUTOPILOT.state()
+                STATE.update(connected=False, running=False, trading_requested=intent['requested'],
+                             halt_reason=intent['halt_reason'], status=str(exc))
         time.sleep(5)
 
 
@@ -326,17 +343,21 @@ class Handler(BaseHTTPRequestHandler):
             AI_EVENT.set()
             return self.send(202, b'{"queued":true}')
         with LOCK:
-            if self.path == '/api/start' and STATE['connected']:
-                STATE['running'] = True
+            if self.path == '/api/start':
+                AUTOPILOT.request(True)
+                STATE.update(trading_requested=True, halt_reason=None, running=bool(STATE['connected']))
             elif self.path == '/api/stop':
-                STATE['running'] = False
+                AUTOPILOT.request(False)
+                STATE.update(trading_requested=False, halt_reason=None, running=False)
             else:
                 return self.send(409, b'{"error":"MT5-Verbindung fehlt"}')
             self.send(200, json.dumps({'running': STATE['running']}).encode('utf-8'))
 
 
 if __name__ == '__main__':
+    # Bind before starting any workers: a second instance must never start trading.
+    server = ThreadingHTTPServer(('127.0.0.1', 8765), Handler)
     threading.Thread(target=worker, daemon=True).start()
     threading.Thread(target=research_worker, daemon=True).start()
     print('Aurum Demo: http://127.0.0.1:8765 — Strg+C beendet den Dienst.')
-    ThreadingHTTPServer(('127.0.0.1', 8765), Handler).serve_forever()
+    server.serve_forever()

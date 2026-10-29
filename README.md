@@ -12,9 +12,9 @@ Für 32 GB RAM und eine RTX 4070 ist zunächst **Qwen2.5 7B über Ollama** vorge
 4. `setup_local_ai.bat` ausführen. Fehlt Ollama, öffnet sich die offizielle Windows-Downloadseite. Ollama installieren/starten und die Datei danach erneut ausführen. Sie lädt `qwen2.5:7b` und testet das lokale Modell.
 5. `local_ai.json` prüfen: Slippage und Kommission an deinen Broker anpassen. `commission_per_lot_round_trip` ist die Gesamtkommission für Eröffnung und Schließung eines Lots in Kontowährung. **0 ist eine Nullkostenannahme**, keine automatisch ermittelte Brokergebühr.
 6. `start.bat` ausführen. Das Browser-Dashboard läuft auf http://127.0.0.1:8765. Das Konsolenfenster offen lassen. Falls sich der Browser zu früh öffnet, die Seite nach Dienststart neu laden.
-7. Unter **Lokale Trading-KI** die Quellenanalyse und Forschungsergebnisse prüfen. Der erste Modellstart kann einige Minuten dauern. Forschung und Kursmodelltraining laufen auch bei pausiertem Demohandel. Danach bei Bedarf **Demohandel starten** anklicken.
+7. Unter **Lokale Trading-KI** die Quellenanalyse und Forschungsergebnisse prüfen. Der erste Modellstart kann einige Minuten dauern. Forschung und Kursmodelltraining laufen auch bei pausiertem Demohandel. Der Autopilot ist bei einer neuen Installation bereits angefordert. Er handelt automatisch, sobald die Daten und sämtliche Prüfungen bereit sind. Ein zuvor manuell gespeicherter Stopp bleibt bestehen.
 
-Die App startet immer mit pausierten Einstiegen. Fehlen Ollama, Nachrichtenquellen oder bestandene Prüfungen, handelt sie standardmäßig nicht. Ein pausierter/gesperrter Bot ist kein Beleg für einen Programmfehler; die Oberfläche zeigt den jeweiligen Grund.
+Der Autopilot ist beim ersten Start standardmäßig aktiviert. **Autopilot stoppen** speichert deinen Stopp dauerhaft; erst **Autopilot aktivieren** hebt ihn wieder auf. Fehlen Ollama, Nachrichtenquellen oder bestandene Prüfungen, handelt sie standardmäßig nicht. Ein pausierter/gesperrter Bot ist kein Beleg für einen Programmfehler; die Oberfläche zeigt den jeweiligen Grund.
 
 ## Update einer vorhandenen Installation
 
@@ -24,6 +24,24 @@ Die App startet immer mit pausierten Einstiegen. Fehlen Ollama, Nachrichtenquell
 4. Die lokale KI wie oben einrichten, anschließend `start.bat` im neuen Ordner starten. Nicht beide Instanzen parallel betreiben. Im Browser **Strg+F5** drücken.
 
 So werden neue Python-Module vollständig übernommen, während deine Daten erhalten bleiben. Ein altes Programm nur durch Austausch von `app.py` zu aktualisieren reicht für diese Version nicht aus.
+
+## Vollautomatischer Betrieb
+
+Nach einmaliger Einrichtung startet `start.bat` die benötigte lokale Ollama-Instanz, falls sie nicht bereits läuft, und AURUM. Die MT5-Python-Anbindung versucht, das installierte Terminal zu initialisieren; dein vorbereitetes Demokonto muss dort verfügbar sein. Bei mehreren MT5-Installationen muss das richtige Terminal gewählt/offen sein. Zugangsdaten werden von AURUM nicht verwaltet.
+
+Der Autopilot ist bei einer neuen Datenbank bereits angefordert. Sobald MT5-Demokonto, aktuelle Daten, Modellprüfung, Strategieforschung, Risikolimits und Signalbestätigungen bereit sind, eröffnet er Demo-Orders selbstständig. Es ist keine Einzelbestätigung je Trade nötig. Nach vorübergehenden Verbindungsfehlern oder Marktpausen versucht der Dienst die Verbindung weiter und wird automatisch wieder bereit. Ein **manueller Stopp bleibt über Neustarts gespeichert**. Kursmodelltraining und Forschungsanalyse können während eines manuellen Handelsstopps weiterlaufen.
+
+Mit `enable_autostart.bat` wird eine Verknüpfung für deinen Benutzer im Windows-Autostart angelegt. AURUM startet dann nach der **Windows-Anmeldung**, nicht bereits vor der Anmeldung. Erst Einrichtung und Modelltownload abschließen, dann Autostart aktivieren. Den Programmordner anschließend nicht verschieben. `disable_autostart.bat` entfernt die Verknüpfung; einen laufenden Dienst beendet das nicht. Falls Windows die PowerShell-Ausführung durch eine Organisationsrichtlinie verhindert, kann die Verknüpfung nicht angelegt werden.
+
+Der PC muss eingeschaltet und wach bleiben, Ollama und MT5 müssen erreichbar sein. Bei ausgeschaltetem PC oder Energiesparmodus erfolgen keine Analysen und keine neuen Orders. Der Autostart ist kein Windows-Dienst und kein Prozess-Watchdog: Ein abgestürzter oder beendeter Python-Prozess wird nicht automatisch innerhalb derselben Sitzung neu gestartet.
+
+### Dauerhaftes Lernen und automatische Pausen
+
+- Kursmodelle trainieren stündlich aus den verfügbaren Kursdaten und älteren abgeschlossenen Trade-Ergebnissen. Neue Daten können die Gewichte verändern; identische Daten können identische Ergebnisse liefern.
+- Die lokale KI aktualisiert Quellenanalysen und ruft frühere Forschungsberichte ab. Unabhängige Strategietests erfolgen erst mit genügend neuen Testkerzen. Sprachmodellgewichte werden dabei nicht feintrainiert.
+- Fehlende Daten, unzureichende Modelle und Risikosperren verhindern Einstiege, während verfügbare Analysefunktionen weiterarbeiten. Automatisch bedeutet nicht, dass Trades erzwungen werden.
+- Vor einem Orderversuch wird die Symbol-/Zeitebenen-/Kerzenkombination dauerhaft gespeichert. Nach Neustarts erfolgt kein zweiter Versuch für dieselbe Kombination.
+- Ist unklar, ob eine Order vom Broker angenommen wurde (etwa Zeitüberschreitung), erfolgt ein gespeicherter Halt statt einer automatischen Wiederholung. Das schützt vor Doppelorders. Die Oberfläche fordert dann zur MT5-Prüfung und ausdrücklichen Reaktivierung auf. Dieses Prüfen bleibt eine Ausnahme vom unbeaufsichtigten Betrieb.
 
 ## Was die einzelnen Teile leisten
 
@@ -59,7 +77,7 @@ Zusätzlich muss die lokale Forschungsstrategie bei `require_research_for_entrie
 
 Das Demokonto wird vor Orders geprüft, Kontowechsel werden gesperrt. Höchstens eine Position pro Symbol, geplantes Risiko 0,25 % der Equity je Einstieg, Tagesverlustsperre 2 % gegen die erste gespeicherte Equity des UTC-Tages. Kontoweite Equity enthält auch manuelle Trades, Ein-/Auszahlungen und offene Verluste. Die Tagesgrenze sperrt neue Einstiege und liquidiert nicht automatisch. **Kein garantiertes Verlustmaximum.**
 
-**Einstiege stoppen** lässt Positionsverwaltung und SL/TP aktiv. Bei Fehlern pausieren neue Einstiege. Offene Positionen bei Bedarf direkt in MT5 schließen. Änderungen von Symbol und Zeitebenen nur ohne offene Bot-Positionen vornehmen. Eine Installation gehört zu einem Konto.
+**Autopilot stoppen** lässt Positionsverwaltung und SL/TP aktiv. Vorübergehende Verbindungsprobleme sperren Einstiege; nach Wiederherstellung wird ein angeforderter Autopilot automatisch wieder bereit. Ein unklarer Orderstatus führt zu einem dauerhaft gespeicherten Halt. Dann MT5 prüfen und den Autopiloten ausdrücklich neu aktivieren. Offene Positionen bei Bedarf direkt in MT5 schließen. Änderungen von Symbol und Zeitebenen nur ohne offene Bot-Positionen vornehmen. Eine Installation gehört zu einem Konto.
 
 ### No-Trading-Zonen
 

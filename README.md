@@ -98,6 +98,18 @@ In `config.json`:
 
 Ein automatischer Kalender mit Sperren vor kommenden Nachrichten ist noch nicht angeschlossen. Eine Analyse bereits veröffentlichter RSS-Texte ersetzt diesen nicht.
 
+## Prüfen, ob MT5 überhaupt Orders annehmen kann
+
+Unter **MT5-Verbindung praktisch testen** gibt es eine bewusst manuelle Diagnose: **Demotest: kleinste Kaufposition eröffnen und schließen**. Ein Klick stoppt den Autopiloten dauerhaft, prüft Demokonto, Kontobindung, freie Positionen/Orders im Symbol, aktuelle Kurse, Broker-Mindestlot, Test-Risikobudget, Tagesverlustgrenze und MT5-Orderprüfung. Dann wird genau ein Kaufversuch mit SL/TP gesendet und die zugehörige Testposition unmittelbar wieder geschlossen. Bei bekannter Position wird nur deren Ticket zum Schließen verwendet.
+
+Der Test ignoriert KI-Einstiegsregeln und manuelle Zeit-/Preiszonen, damit die technische Orderverbindung unabhängig davon prüfbar ist. Er verwendet nicht die gespeicherte feste Lotgröße. Testtrades haben eine separate Kennzeichnung und gelangen nicht in das Kursmodelltraining. Es können Spread und Gebühren im Demokonto anfallen.
+
+Das Ergebnis zeigt die einzelnen Schritte, Orderticket und MT5-Rückmeldungen. **Eröffnen und Schließen bestätigt** beweist nur die technische Verbindung auf deinem Konto. Markt geschlossen, Handelsfreigabe fehlt, ungültige Brokerparameter oder unklare Antworten erscheinen als Fehler. Ein nicht eindeutig bestätigtes Ergebnis wird nicht als Erfolg angezeigt und nicht automatisch erneut eröffnet. Wenn die Position nicht als geschlossen bestätigt ist, direkt in MT5 prüfen und bei Bedarf manuell schließen. Erst nach eigener Prüfung und ohne offene Positionen/Orders im Symbol lässt sich ein ungeklärter Teststatus über den entsprechenden Button zurücksetzen. Zwischen Versuchen liegen mindestens 60 Sekunden.
+
+Der Autopilot bleibt nach dem Test gestoppt. **Autopilot aktivieren** startet anschließend wieder die normale Strategieausführung mit allen bisherigen Filtern. Im Testbereich stehen außerdem die gemeldeten Einstiegssperren des laufenden Datenzyklus. Sie erklären, warum die Strategie aktuell nichts eröffnet. Ein bestandener Verbindungstest entfernt diese Sperren nicht.
+
+Für dieses Update die aktuelle `app.py`, das neue Modul `demo_test.py` und den Ordner `static` in den bisherigen Programmordner übernehmen oder die vollständige ZIP nach der allgemeinen Update-Anleitung verwenden. Dann Dienst neu starten und im Browser Strg+F5 drücken. Frühere Testprotokolle werden in `trades.sqlite` gespeichert, nicht als simulierte Broker-Erfolge erfunden. Die automatisierten Tests verwenden ein simuliertes Terminal; der reale Verbindungsnachweis entsteht erst beim Klick auf deinem Windows-PC.
+
 ## Wo du das Lernen siehst
 
 **Lokale Trading-KI:** Quellenanalyse, Hypothese, Kandidat/Referenz, Handelskosten, Test-Trades, Netto-R, Drawdown, Freigabe und letzte Forschungsberichte. Das funktioniert erst nach erfolgreicher lokaler Einrichtung und verfügbarer Datenverbindung.

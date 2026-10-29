@@ -14,6 +14,7 @@ from learning import init_journal, record_training, training_history
 from local_ai import load_settings, ResearchJournal, run_research, research_entry_reason
 from automation import Autopilot
 from sizing import SizingPreferences, selected_volume
+from demo_test import DemoOrderTest
 
 ROOT = Path(__file__).resolve().parent
 TOKEN = secrets.token_urlsafe(32)
@@ -32,6 +33,7 @@ DB.commit()
 init_journal(DB)
 AUTOPILOT = Autopilot(DB)
 SIZING = SizingPreferences(DB)
+DEMO_TEST = DemoOrderTest(DB)
 
 
 def config():
@@ -250,15 +252,22 @@ def worker():
                 if positions is None:
                     raise RuntimeError('Positionen konnten nicht gelesen werden.')
                 reason = zone_reason(cfg, tick.ask, tick.ask-tick.bid, atr)
+                blockers = [reason] if reason else []
                 if baseline <= 0 or account.equity <= baseline*(1-cfg['daily_loss_percent']/100):
                     reason = 'Tagesverlustgrenze erreicht'
+                    blockers.append(reason)
                 reason = reason or signal_reason or ai_reason or sizing_reason
+                blockers.extend(v for v in (signal_reason, ai_reason, sizing_reason) if v)
                 if positions:
+                    blockers.append('Position im Symbol bereits offen')
                     reason = 'Position im Symbol bereits offen'
                 STATE['running'] = intent['armed']
+                if not intent['requested']:
+                    blockers.append('Autopilot ist manuell gestoppt')
                 if intent['halt_reason']:
                     reason = intent['halt_reason']
-                STATE.update(connected=True, symbol=cfg['symbol'], balance=account.balance,
+                    blockers.append(reason)
+                STATE.update(blockers=list(dict.fromkeys(blockers)), connected=True, symbol=cfg['symbol'], balance=account.balance,
                              equity=account.equity, bid=tick.bid, ask=tick.ask,
                              probability=p, atr=atr, positions=len(positions),
                              timeframes=reports, execution_timeframe=execution,
@@ -314,7 +323,7 @@ def worker():
             with LOCK:
                 intent = AUTOPILOT.state()
                 STATE.update(connected=False, running=False, trading_requested=intent['requested'],
-                             halt_reason=intent['halt_reason'], status=str(exc))
+                             halt_reason=intent['halt_reason'], blockers=[str(exc)], status=str(exc))
         time.sleep(5)
 
 
@@ -337,6 +346,9 @@ class Handler(BaseHTTPRequestHandler):
         if not self.valid_host():
             return self.send(403, b'{}')
         path = urlparse(self.path).path
+        if path == '/api/demo-test':
+            with LOCK:
+                return self.send(200, json.dumps(DEMO_TEST.latest(), ensure_ascii=False).encode('utf-8'))
         if path == '/api/sizing':
             with LOCK:
                 return self.send(200, json.dumps(dict(preferences=SIZING.get(), broker=STATE.get('volume_limits'),
@@ -358,6 +370,29 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if not self.valid_host() or not secrets.compare_digest(self.headers.get('X-Token', ''), TOKEN):
             return self.send(403, b'{}')
+        if self.path in ('/api/demo-test', '/api/demo-test/reset'):
+            with LOCK:
+                AUTOPILOT.request(False)
+                STATE.update(running=False, trading_requested=False)
+                try:
+                    import MetaTrader5 as mt
+                    if not mt.initialize():
+                        raise ValueError('MT5 nicht erreichbar. Terminal und Demokonto öffnen.')
+                    account = assert_demo(mt)
+                    key = f'{account.server}:{account.login}'
+                    binding = ROOT/'account.json'
+                    expected = json.loads(binding.read_text(encoding='utf-8-sig'))['account'] if binding.exists() else key
+                    if expected != key:
+                        raise ValueError('Anderes Konto erkannt. Kein Testtrade.')
+                    if not binding.exists():
+                        binding.write_text(json.dumps(dict(account=key)), encoding='utf-8')
+                    cfg = config()
+                    result = DEMO_TEST.reset(mt, cfg['symbol'], expected) if self.path.endswith('/reset') else DEMO_TEST.run(mt, cfg, expected)
+                    if result and result['status'] in ('attention', 'running'):
+                        AUTOPILOT.halt('Testorder ungeklärt: Positionen und Orders in MT5 prüfen.')
+                    return self.send(200, json.dumps(result, ensure_ascii=False).encode('utf-8'))
+                except (ImportError, ValueError, RuntimeError) as exc:
+                    return self.send(400, json.dumps(dict(error=str(exc)), ensure_ascii=False).encode('utf-8'))
         if self.path == '/api/sizing':
             try:
                 length = int(self.headers.get('Content-Length', '0'))
